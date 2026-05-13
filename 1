@@ -1,0 +1,107 @@
+// Піни підключення
+const int btn1Pin = 18;
+const int btn2Pin = 19;
+const int led1Pin = 21;
+const int led2Pin = 22;
+const int photoPin = 34;
+
+// Змінні для ISR (обов'язково з модифікатором volatile)
+volatile bool flagTask1 = false;
+volatile bool flagTask2 = false;
+volatile int button2PressCount = 0;
+volatile bool led2Active = false;
+
+// Змінні для усунення "брязкоту" контактів (debouncing)
+volatile unsigned long lastDebounceTime1 = 0;
+volatile unsigned long lastDebounceTime2 = 0;
+const unsigned long debounceDelay = 250; // Затримка 250 мс для стабільності
+
+// Налаштування ШІМ (PWM) для другого світлодіода (ESP32 API v3.x)
+const int pwmFreq = 5000;
+const int pwmResolution = 8; // 8 біт (значення від 0 до 255)
+
+// Обробник переривання 1 (Відпускання першої кнопки)
+void IRAM_ATTR isrButton1() {
+unsigned long currentTime = millis();
+if ((currentTime - lastDebounceTime1) > debounceDelay) {
+flagTask1 = true; // Сигнал для loop()
+lastDebounceTime1 = currentTime;
+}
+}
+
+// Обробник переривання 2 (Натискання другої кнопки)
+void IRAM_ATTR isrButton2() {
+unsigned long currentTime = millis();
+if ((currentTime - lastDebounceTime2) > debounceDelay) {
+button2PressCount++;
+led2Active = !led2Active; // Змінюємо стан: увімкнено/вимкнено
+flagTask2 = true; // Сигнал для loop()
+lastDebounceTime2 = currentTime;
+}
+}
+
+void setup() {
+Serial.begin(115200);
+
+// Налаштування пінів кнопок (використовуємо внутрішню підтяжку до 3.3V)
+pinMode(btn1Pin, INPUT_PULLUP);
+pinMode(btn2Pin, INPUT_PULLUP);
+
+// Налаштування пінів діодів та фоторезистора
+pinMode(led1Pin, OUTPUT);
+pinMode(photoPin, INPUT);
+
+// Налаштування ШІМ для другого діода (Оновлений API)
+ledcAttach(led2Pin, pwmFreq, pwmResolution);
+
+// Прив'язка переривань:
+// RISING - спрацьовує при відпусканні кнопки (перехід з LOW в HIGH через INPUT_PULLUP)
+attachInterrupt(digitalPinToInterrupt(btn1Pin), isrButton1, RISING);
+
+// FALLING - спрацьовує при натисканні кнопки (перехід з HIGH в LOW)
+attachInterrupt(digitalPinToInterrupt(btn2Pin), isrButton2, FALLING);
+
+Serial.println("Система готова! Очікування натискань...");
+}
+
+void loop() {
+// --- ЗАВДАННЯ 1: Обробка першого переривання ---
+if (flagTask1) {
+flagTask1 = false; // Скидаємо прапорець
+
+digitalWrite(led1Pin, HIGH); // Вмикаємо перший діод
+
+// Зчитуємо дані з фоторезистора (через АЦП)
+int photoVal = analogRead(photoPin);
+Serial.print("Відпущено кнопку 1. Дані фоторезистора: ");
+Serial.println(photoVal);
+
+// Мигаємо діодом після переривання (затримка тут безпечна, бо ми в loop)
+delay(500); 
+digitalWrite(led1Pin, LOW); // Вимикаємо
+}
+
+// --- ЗАВДАННЯ 2: Обробка другого переривання ---
+if (flagTask2) {
+flagTask2 = false; // Скидаємо прапорець
+
+Serial.print("Кнопка 2 натиснута. Лічильник: ");
+Serial.println(button2PressCount);
+
+if (led2Active) {
+// Розраховуємо яскравість (5 рівнів: 51, 102, 153, 204, 255)
+// % 5 дозволяє яскравості йти по колу
+int brightnessStep = (button2PressCount % 5) + 1; 
+int brightness = brightnessStep * 51; 
+
+ledcWrite(led2Pin, brightness); // Встановлюємо яскравість (Оновлений API)
+
+Serial.print("Другий діод УВІМКНЕНО. Яскравість (ШІМ): ");
+Serial.println(brightness);
+} else {
+// Якщо стан "вимкнено", гасимо діод
+ledcWrite(led2Pin, 0); // (Оновлений API)
+Serial.println("Другий діод ВИМКНЕНО.");
+}
+}
+}
