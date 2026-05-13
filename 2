@@ -1,0 +1,86 @@
+#include "esp_timer.h"
+
+const int photoPin = 34;
+
+// Прапорці від таймерів
+volatile bool timer1Flag = false;
+volatile bool timer2Flag = false;
+
+// Лічильники спрацювань
+volatile uint32_t timer1Count = 0;
+volatile uint32_t timer2Count = 0;
+
+// Об'єкти таймерів
+esp_timer_handle_t timer1;
+esp_timer_handle_t timer2;
+
+// Колбеки таймерів
+void timer1Callback(void* arg) {
+timer1Flag = true;
+timer1Count++;
+}
+
+void timer2Callback(void* arg) {
+timer2Flag = true;
+timer2Count++;
+}
+
+void setup() {
+Serial.begin(115200);
+delay(1000);
+
+pinMode(photoPin, INPUT);
+
+// Конфігурація таймера 1
+esp_timer_create_args_t timer1Args = {
+.callback = &timer1Callback,
+.arg = NULL,
+.dispatch_method = ESP_TIMER_TASK,
+.name = "timer1"
+};
+
+// Конфігурація таймера 2
+esp_timer_create_args_t timer2Args = {
+.callback = &timer2Callback,
+.arg = NULL,
+.dispatch_method = ESP_TIMER_TASK,
+.name = "timer2"
+};
+
+// Створення таймерів
+esp_timer_create(&timer1Args, &timer1);
+esp_timer_create(&timer2Args, &timer2);
+
+// Запуск періодичних таймерів
+// час в мікросекундах
+esp_timer_start_periodic(timer1, 1000000); // 1 секунда
+esp_timer_start_periodic(timer2, 3000000); // 3 секунди
+
+Serial.println("Система запущена");
+Serial.println("Timer1 -> кожну 1 секунду");
+Serial.println("Timer2 -> кожні 3 секунди");
+}
+
+void loop() {
+if (timer1Flag) {
+timer1Flag = false;
+
+int adcValue = analogRead(photoPin);
+
+Serial.print("[TIMER 1] Спрацювання №");
+Serial.print(timer1Count);
+Serial.print(" | ADC = ");
+Serial.println(adcValue);
+}
+
+if (timer2Flag) {
+timer2Flag = false;
+
+int adcValue = analogRead(photoPin);
+
+Serial.print("[TIMER 2] Спрацювання №");
+Serial.print(timer2Count);
+Serial.print(" | ADC = ");
+Serial.println(adcValue);
+}
+}
