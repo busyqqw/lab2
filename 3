@@ -1,0 +1,140 @@
+#include "esp_timer.h"
+
+// ===== ПІНИ =====
+const int ldrPin = 34; // фоторезистор (ADC)
+const int buttonPin = 18; // кнопка
+const int ledTimer = 25; // діод для таймера
+const int ledButton = 26; // діод для кнопки
+
+// ===== ТАЙМЕР =====
+esp_timer_handle_t readTimer;
+volatile bool timerFlag = false;
+volatile uint32_t timerCount = 0;
+
+// ===== КНОПКА =====
+volatile bool buttonEdgeFlag = false;
+volatile bool buttonLevel = HIGH;
+volatile unsigned long buttonEdgeTime = 0;
+volatile unsigned long lastInterruptTime = 0;
+
+unsigned long pressStartTime = 0;
+unsigned long pressDuration = 0;
+
+// ===== КЕРУВАННЯ ДІОДАМИ БЕЗ delay() =====
+unsigned long ledTimerOffTime = 0;
+unsigned long ledButtonOffTime = 0;
+
+// ===== CALLBACK ТАЙМЕРА =====
+void timerCallback(void* arg) {
+timerFlag = true;
+timerCount++;
+}
+
+// ===== ПЕРЕРИВАННЯ КНОПКИ =====
+void IRAM_ATTR handleButtonInterrupt() {
+unsigned long now = millis();
+
+// антидребезг
+if (now - lastInterruptTime > 50) {
+buttonLevel = digitalRead(buttonPin);
+buttonEdgeTime = now;
+buttonEdgeFlag = true;
+lastInterruptTime = now;
+}
+}
+
+void setup() {
+Serial.begin(115200);
+delay(1000);
+
+pinMode(ldrPin, INPUT);
+pinMode(buttonPin, INPUT_PULLUP);
+
+pinMode(ledTimer, OUTPUT);
+pinMode(ledButton, OUTPUT);
+
+digitalWrite(ledTimer, LOW);
+digitalWrite(ledButton, LOW);
+
+// Переривання по зміні стану кнопки
+attachInterrupt(digitalPinToInterrupt(buttonPin), handleButtonInterrupt, CHANGE);
+
+// Налаштування таймера
+esp_timer_create_args_t timerArgs = {
+.callback = &timerCallback,
+.arg = NULL,
+.dispatch_method = ESP_TIMER_TASK,
+.name = "ldr_timer"
+};
+
+esp_timer_create(&timerArgs, &readTimer);
+
+// Період таймера: 2 секунди
+esp_timer_start_periodic(readTimer, 2000000);
+
+Serial.println("Система запущена");
+Serial.println("Таймер читає фоторезистор кожні 2 секунди");
+Serial.println("Кнопка вимірює тривалість зажимання");
+}
+
+void loop() {
+unsigned long now = millis();
+
+// ===== ОБРОБКА ТАЙМЕРА =====
+if (timerFlag) {
+timerFlag = false;
+
+int ldrValue = analogRead(ldrPin);
+
+Serial.print("[TIMER] Спрацювання №");
+Serial.print(timerCount);
+Serial.print(" | LDR = ");
+Serial.println(ldrValue);
+
+// блимаємо діодом після завершення таймерного переривання
+digitalWrite(ledTimer, HIGH);
+ledTimerOffTime = now + 150;
+}
+
+// ===== ОБРОБКА КНОПКИ =====
+if (buttonEdgeFlag) {
+noInterrupts();
+bool localLevel = buttonLevel;
+unsigned long localEdgeTime = buttonEdgeTime;
+buttonEdgeFlag = false;
+interrupts();
+
+// Кнопку натиснули
+if (localLevel == LOW) {
+pressStartTime = localEdgeTime;
+Serial.println("[BUTTON] Натиснуто");
+}
+// Кнопку відпустили
+else {
+if (pressStartTime > 0) {
+pressDuration = localEdgeTime - pressStartTime;
+
+Serial.print("[BUTTON] Відпущено. Тривалість зажимання: ");
+Serial.print(pressDuration);
+Serial.println(" мс");
+
+digitalWrite(ledButton, HIGH);
+ledButtonOffTime = now + pressDuration;
+
+pressStartTime = 0;
+}
+}
+}
+
+// ===== ВИМКНЕННЯ LED ТАЙМЕРА =====
+if (ledTimerOffTime > 0 && now >= ledTimerOffTime) {
+digitalWrite(ledTimer, LOW);
+ledTimerOffTime = 0;
+}
+
+// ===== ВИМКНЕННЯ LED КНОПКИ =====
+if (ledButtonOffTime > 0 && now >= ledButtonOffTime) {
+digitalWrite(ledButton, LOW);
+ledButtonOffTime = 0;
+}
+}
